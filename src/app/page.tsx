@@ -1,120 +1,163 @@
-import Image from "next/image";
-import Link from "next/link";
+'use client';
+
+import React, { useState, useMemo } from 'react';
+import { MultiselectTypeahead } from '@/components/MultiselectTypeahead';
+import { employees, departments, teams, groups } from '@/data';
+import type { FilterItem } from '@/components/MultiselectTypeahead';
+import type { Employee } from '@/data';
 
 export default function Home() {
+  const [selectedFilters, setSelectedFilters] = useState<FilterItem[]>([]);
+  const [filteredEmployees, setFilteredEmployees] = useState<Employee[]>(employees);
+
+  // Handle filter changes
+  const handleFiltersChange = (filters: FilterItem[]) => {
+    setSelectedFilters(filters);
+  };
+
+  // Handle employee selection
+  const handleEmployeeSelect = (employees: Employee[]) => {
+    setFilteredEmployees(employees);
+  };
+
+  // Clear all filters
+  const clearAllFilters = () => {
+    setSelectedFilters([]);
+    setFilteredEmployees(employees);
+  };
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
+    <div className="min-h-screen bg-white py-8">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         
-        <div className="text-center sm:text-left">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">
-            Employee Multiselect Typeahead
-          </h1>
-          <p className="text-lg text-gray-600 mb-6">
-            Advanced filtering and selection component for employee data with compound filter chips
+        {/* Approval Chain Selector */}
+        <h2 className="text-xl font-semibold text-gray-900 mb-4">
+          Approval Chain (040404 %89)
+        </h2>
+        
+        <div className="bg-[#05084A]/[0.02] rounded-xl p-3 mb-8">
+          <p className="text-sm text-gray-600 mb-4">
+            Select the order and who needs to approve this request. Only one person in each step needs to approve. (696968)
           </p>
           
-          <Link
-            href="/demo"
-            className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
-          >
-            View Demo
-          </Link>
-        </div>
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+          <MultiselectTypeahead
+            employees={employees}
+            departments={departments}
+            teams={teams}
+            groups={groups}
+            selectedFilters={selectedFilters}
+            onFiltersChange={handleFiltersChange}
+            onEmployeeSelect={handleEmployeeSelect}
+            placeholder="Search employees, departments, teams, or attributes..."
+            maxSelections={20}
+          />
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+          {/* Clear Filters Button */}
+          {selectedFilters.length > 0 && (
+            <div className="mt-4">
+              <button
+                onClick={clearAllFilters}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+              >
+                Clear All Filters
+              </button>
+            </div>
+          )}
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+        {/* Employee List */}
+        <h2 className="text-xl font-semibold text-gray-900 mb-4">
+          Employee Results ({filteredEmployees.length})
+        </h2>
+        
+        <div className="bg-[#05084A]/[0.02] rounded-xl p-3">
+          
+          {filteredEmployees.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              No employees match the current filters
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Employee
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Position
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Department
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Team
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Workplace
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredEmployees.slice(0, 50).map((employee) => (
+                    <tr key={employee.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <div className="flex-shrink-0 h-10 w-10">
+                            <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
+                              <span className="text-sm font-medium text-blue-600">
+                                {employee.firstName[0]}{employee.lastName[0]}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="ml-4">
+                            <div className="text-sm font-medium text-gray-900">
+                              {employee.firstName} {employee.lastName}
+                            </div>
+                            <div className="text-sm text-gray-500">{employee.email}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {employee.position}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {employee.department}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {employee.team}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {employee.workplace}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          employee.employmentStatus === 'Full time' 
+                            ? 'bg-green-100 text-green-800'
+                            : employee.employmentStatus === 'Part time'
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {employee.employmentStatus}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              
+              {filteredEmployees.length > 50 && (
+                <div className="mt-4 text-center text-sm text-gray-500">
+                  Showing first 50 results of {filteredEmployees.length} employees
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

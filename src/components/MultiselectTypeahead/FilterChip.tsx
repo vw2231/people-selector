@@ -39,6 +39,27 @@ export function FilterChip({ filter, onOperatorChange, onRemove }: FilterChipPro
     }
   };
 
+  // Simplified chip styling for relationships, groups, and people
+  if (filter.category === 'relationships' || filter.category === 'groups' || filter.category === 'people') {
+    return (
+      <div className="inline-flex items-center bg-[#F0F0F0] rounded-[4px] m-0.5">
+        <span className="px-2 py-0.5 text-sm text-gray-700">
+          {filter.subject}
+        </span>
+        <button
+          type="button"
+          className="pl-0.5 pr-2 py-0.5 text-[#646464] hover:text-gray-700 focus:outline-none focus:ring-1 focus:ring-gray-400 rounded-r-[4px]"
+          onClick={() => onRemove(filter.id)}
+          onKeyDown={(e) => handleKeyDown(e, 'remove')}
+          aria-label={`Remove filter: ${filter.subject}`}
+        >
+          <XMarkIcon className="w-4 h-4" />
+        </button>
+      </div>
+    );
+  }
+
+  // Regular filter chip for non-relationship filters
   return (
     <div className="filter-chip inline-flex items-center bg-blue-100 rounded-md m-0.5 shadow-sm">
       {/* Subject */}

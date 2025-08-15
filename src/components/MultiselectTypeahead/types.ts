@@ -18,7 +18,7 @@ export interface FilterItem {
   value: string | number | Date;
   displayValue: string;
   availableOperators: FilterOperator[];
-  metadata?: Record<string, any>; // Additional data for complex filters
+  metadata?: Record<string, unknown>; // Additional data for complex filters
 }
 
 // Filter option interfaces
@@ -32,7 +32,7 @@ export interface EmployeeFilterOptions {
 export interface RelationshipOption {
   id: string;
   label: string;
-  type: 'supervisor' | 'direct_report' | 'skip_level' | 'peer';
+  type: 'supervisor' | 'secondary_supervisor' | 'team_lead' | 'department_lead' | 'direct_report' | 'skip_level' | 'peer';
   targetPersonId: string;
   targetPersonName: string;
   description: string;

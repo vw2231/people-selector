@@ -8,7 +8,8 @@ import type {
   GroupOption,
   AttributeOption,
   PersonOption,
-  FilterOperator
+  FilterOperator,
+  FilterItem
 } from './types';
 
 // Generate all filter options from employee data
@@ -30,57 +31,54 @@ export function generateFilterOptions(
 function generateRelationshipOptions(employees: Employee[]): RelationshipOption[] {
   const options: RelationshipOption[] = [];
   
-  // Find all supervisors
-  const supervisors = [...new Set(employees.map(emp => emp.supervisor))];
+  // Supervisor relationship
+  options.push({
+    id: 'rel-supervisor',
+    label: 'Supervisor',
+    type: 'supervisor',
+    targetPersonId: 'supervisor',
+    targetPersonName: 'Supervisor',
+    description: 'Filter by direct supervisor'
+  });
   
-  supervisors.forEach(supervisor => {
-    if (supervisor === 'CEO') return; // Skip CEO for now
-    
-    const supervisorEmployee = employees.find(emp => 
-      `${emp.firstName} ${emp.lastName}` === supervisor ||
-      emp.firstName === supervisor ||
-      emp.lastName === supervisor
-    );
-    
-    if (supervisorEmployee) {
-      // Direct reports
-      const directReports = employees.filter(emp => emp.supervisor === supervisor);
-      if (directReports.length > 0) {
-        options.push({
-          id: `rel-direct-${supervisorEmployee.id}`,
-          label: `Direct reports of ${supervisor}`,
-          type: 'direct_report',
-          targetPersonId: supervisorEmployee.id,
-          targetPersonName: supervisor,
-          description: `${directReports.length} direct reports`
-        });
-      }
-      
-      // Supervised by
-      options.push({
-        id: `rel-supervised-${supervisorEmployee.id}`,
-        label: `Supervised by ${supervisor}`,
-        type: 'supervisor',
-        targetPersonId: supervisorEmployee.id,
-        targetPersonName: supervisor,
-        description: 'Filter by supervisor'
-      });
-      
-      // Peers (same supervisor)
-      const peers = employees.filter(emp => 
-        emp.supervisor === supervisor && emp.id !== supervisorEmployee.id
-      );
-      if (peers.length > 0) {
-        options.push({
-          id: `rel-peers-${supervisorEmployee.id}`,
-          label: `Peers of ${supervisor}`,
-          type: 'peer',
-          targetPersonId: supervisorEmployee.id,
-          targetPersonName: supervisor,
-          description: `${peers.length} peers with same supervisor`
-        });
-      }
-    }
+  // Secondary Supervisor relationship
+  options.push({
+    id: 'rel-secondary-supervisor',
+    label: 'Secondary Supervisor',
+    type: 'secondary_supervisor',
+    targetPersonId: 'secondary_supervisor',
+    targetPersonName: 'Secondary Supervisor',
+    description: 'Filter by secondary supervisor'
+  });
+  
+  // Supervisor's Supervisor relationship
+  options.push({
+    id: 'rel-supervisors-supervisor',
+    label: 'Supervisor\'s Supervisor',
+    type: 'skip_level',
+    targetPersonId: 'skip_level_supervisor',
+    targetPersonName: 'Skip Level Supervisor',
+    description: 'Filter by supervisor\'s supervisor'
+  });
+  
+  // Team Lead relationship
+  options.push({
+    id: 'rel-team-lead',
+    label: 'Team Lead',
+    type: 'team_lead',
+    targetPersonId: 'team_lead',
+    targetPersonName: 'Team Lead',
+    description: 'Filter by team lead'
+  });
+  
+  // Department Lead relationship
+  options.push({
+    id: 'rel-department-lead',
+    label: 'Department Lead',
+    type: 'department_lead',
+    targetPersonId: 'department_lead',
+    targetPersonName: 'Department Lead',
+    description: 'Filter by department lead'
   });
   
   return options;
@@ -94,39 +92,11 @@ function generateGroupOptions(
 ): GroupOption[] {
   const options: GroupOption[] = [];
   
-  // Department options
-  departments.forEach(dept => {
-    options.push({
-      id: `dept-${dept.id}`,
-      label: `Department: ${dept.name}`,
-      type: 'department',
-      groupId: dept.id,
-      groupName: dept.name,
-      memberCount: 0, // Will be calculated when used
-      category: 'Department',
-      description: dept.description
-    });
-  });
-  
-  // Team options
-  teams.forEach(team => {
-    options.push({
-      id: `team-${team.id}`,
-      label: `Team: ${team.name}`,
-      type: 'team',
-      groupId: team.id,
-      groupName: team.name,
-      memberCount: 0, // Will be calculated when used
-      category: team.department,
-      description: team.description
-    });
-  });
-  
-  // Special groups
+  // Only include special groups, not departments or teams
   groups.forEach(group => {
     options.push({
       id: `group-${group.id}`,
-      label: `Group: ${group.name}`,
+      label: group.name,
       type: 'group',
       groupId: group.id,
       groupName: group.name,
@@ -155,7 +125,7 @@ function generateAttributeOptions(employees: Employee[]): AttributeOption[] {
       label: 'Employment Type',
       attributeKey: 'employmentType',
       dataType: 'enum',
-      possibleValues: ['internal', 'external'],
+      possibleValues: ['Internal', 'External'],
       description: 'Filter by employment relationship'
     },
     {
@@ -258,13 +228,13 @@ export function getAvailableOperators(dataType: 'string' | 'number' | 'date' | '
 }
 
 // Get the value of an employee attribute
-export function getEmployeeValue(employee: Employee, attributeKey: keyof Employee): any {
+export function getEmployeeValue(employee: Employee, attributeKey: keyof Employee): unknown {
   return employee[attributeKey];
 }
 
 // Evaluate a single filter against an employee
-export function evaluateFilter(employee: Employee, filter: any): boolean {
-  let value: any;
+export function evaluateFilter(employee: Employee, filter: FilterItem): boolean {
+  let value: unknown;
   
   // Handle special cases for relationships and groups
   if (filter.category === 'relationships') {
@@ -289,9 +259,9 @@ export function evaluateFilter(employee: Employee, filter: any): boolean {
     case 'less than':
       return Number(value) < Number(filter.value);
     case 'before':
-      return new Date(value) < new Date(filter.value);
+      return new Date(String(value)) < new Date(String(filter.value));
     case 'after':
-      return new Date(value) > new Date(filter.value);
+      return new Date(String(value)) > new Date(String(filter.value));
     case 'between':
       if (Array.isArray(filter.value) && filter.value.length === 2) {
         const numValue = Number(value);
@@ -304,20 +274,38 @@ export function evaluateFilter(employee: Employee, filter: any): boolean {
 }
 
 // Helper function to get relationship values
-function getRelationshipValue(employee: Employee, filter: any): boolean {
-  // This would need to be implemented based on the specific relationship type
-  // For now, return a placeholder
-  return false;
+function getRelationshipValue(employee: Employee, filter: FilterItem): boolean {
+  const originalOption = filter.metadata?.originalOption as { type: string; targetPersonName?: string };
+  if (!originalOption) return false;
+  
+  switch (originalOption.type) {
+    case 'supervisor':
+      return employee.supervisor === filter.displayValue;
+    case 'secondary_supervisor':
+      return employee.secondarySupervisor === filter.displayValue;
+    case 'skip_level':
+      // For skip-level supervisor, we would need to implement this based on the actual data structure
+      // This is a placeholder - in practice you'd need to pass the employees array or implement differently
+      return false; // Placeholder for now
+    case 'team_lead':
+      // Check if employee's team has a lead (this would need to be implemented based on your data structure)
+      return false; // Placeholder for now
+    case 'department_lead':
+      // Check if employee's department has a lead (this would need to be implemented based on your data structure)
+      return false; // Placeholder for now
+    default:
+      return false;
+  }
 }
 
 // Helper function to get group values
-function getGroupValue(employee: Employee, filter: any): boolean {
-  if (filter.type === 'department') {
-    return employee.department === filter.groupName;
-  } else if (filter.type === 'team') {
-    return employee.team === filter.groupName;
-  } else if (filter.type === 'group') {
-    return employee.groups.includes(filter.groupId);
+function getGroupValue(employee: Employee, filter: FilterItem): boolean {
+  const originalOption = filter.metadata?.originalOption as { type: string; groupName?: string; groupId?: string };
+  if (!originalOption) return false;
+  
+  // Only handle groups now
+  if (originalOption.type === 'group') {
+    return employee.groups.includes(originalOption.groupId || '');
   }
   return false;
 }

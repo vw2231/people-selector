@@ -106,7 +106,8 @@ function generateGroupOptions(
     });
   });
   
-  return options;
+  // Sort groups alphabetically by name
+  return options.sort((a, b) => a.label.localeCompare(b.label));
 }
 
 // Generate attribute-based filter options
@@ -144,6 +145,20 @@ function generateAttributeOptions(employees: Employee[]): AttributeOption[] {
       description: 'Filter by job title'
     },
     {
+      id: 'attr-department',
+      label: 'Department',
+      attributeKey: 'department',
+      dataType: 'string',
+      description: 'Filter by department'
+    },
+    {
+      id: 'attr-team',
+      label: 'Team',
+      attributeKey: 'team',
+      dataType: 'string',
+      description: 'Filter by team'
+    },
+    {
       id: 'attr-weeklyHours',
       label: 'Weekly Hours',
       attributeKey: 'weeklyHours',
@@ -159,7 +174,7 @@ function generateAttributeOptions(employees: Employee[]): AttributeOption[] {
     },
     {
       id: 'attr-legalEntity',
-      label: 'Legal Entity',
+      label: 'Legal Entities',
       attributeKey: 'legalEntity',
       dataType: 'string',
       description: 'Filter by company legal structure'
@@ -199,9 +214,9 @@ function generateAttributeOptions(employees: Employee[]): AttributeOption[] {
 
 // Generate person-based filter options
 function generatePersonOptions(employees: Employee[]): PersonOption[] {
-  return employees.map(emp => ({
+  const options = employees.map(emp => ({
     id: `person-${emp.id}`,
-    label: `${emp.firstName} ${emp.lastName} (${emp.position})`,
+    label: `${emp.firstName} ${emp.lastName}`,
     employeeId: emp.id,
     name: `${emp.firstName} ${emp.lastName}`,
     position: emp.position,
@@ -209,19 +224,38 @@ function generatePersonOptions(employees: Employee[]): PersonOption[] {
     team: emp.team,
     email: emp.email
   }));
+  
+  // Sort people alphabetically by full name
+  return options.sort((a, b) => a.label.localeCompare(b.label));
 }
 
 // Get available operators for a specific data type
 export function getAvailableOperators(dataType: 'string' | 'number' | 'date' | 'enum'): FilterOperator[] {
   switch (dataType) {
     case 'string':
-      return ['is', 'is not', 'contains', 'does not contain'];
+      return [
+        'is', 'is not',
+        'contains', 'does not contain',
+        'starts with', 'ends with',
+        'is empty'
+      ];
     case 'number':
-      return ['is', 'is not', 'greater than', 'less than', 'between'];
+      return [
+        'is', 'is not',
+        'less than', 'greater than',
+        'less than or equal', 'greater than or equal'
+      ];
     case 'date':
-      return ['is', 'is not', 'before', 'after', 'between'];
+      return [
+        'is', 'is not',
+        'before', 'after',
+        'on or before', 'on or after'
+      ];
     case 'enum':
-      return ['is', 'is not'];
+      return [
+        'is', 'is not',
+        'is one of', 'is all of'
+      ];
     default:
       return ['is', 'is not'];
   }
@@ -246,28 +280,60 @@ export function evaluateFilter(employee: Employee, filter: FilterItem): boolean 
   }
   
   switch (filter.operator) {
+    // String/Text operators
     case 'is':
       return value === filter.value;
     case 'is not':
       return value !== filter.value;
+    case 'is one of':
+      if (Array.isArray(filter.value)) {
+        return filter.value.includes(String(value));
+      }
+      return false;
+    case 'is all of':
+      if (Array.isArray(filter.value)) {
+        // For "is all of", the employee must have ALL the selected values
+        // This would typically be used for multi-select attributes like groups
+        return filter.value.every(val => String(value).includes(val));
+      }
+      return false;
     case 'contains':
       return String(value).toLowerCase().includes(String(filter.value).toLowerCase());
     case 'does not contain':
       return !String(value).toLowerCase().includes(String(filter.value).toLowerCase());
+    case 'starts with':
+      return String(value).toLowerCase().startsWith(String(filter.value).toLowerCase());
+    case 'ends with':
+      return String(value).toLowerCase().endsWith(String(filter.value).toLowerCase());
+    case 'is empty':
+      return !value || String(value).trim() === '';
+    
+    // Number operators
     case 'greater than':
       return Number(value) > Number(filter.value);
     case 'less than':
       return Number(value) < Number(filter.value);
+    case 'greater than or equal':
+      return Number(value) >= Number(filter.value);
+    case 'less than or equal':
+      return Number(value) <= Number(filter.value);
+    
+    // Date/Time operators
     case 'before':
       return new Date(String(value)) < new Date(String(filter.value));
     case 'after':
       return new Date(String(value)) > new Date(String(filter.value));
-    case 'between':
-      if (Array.isArray(filter.value) && filter.value.length === 2) {
-        const numValue = Number(value);
-        return numValue >= filter.value[0] && numValue <= filter.value[1];
-      }
-      return false;
+    case 'on or before':
+      return new Date(String(value)) <= new Date(String(filter.value));
+    case 'on or after':
+      return new Date(String(value)) >= new Date(String(filter.value));
+    
+    // Boolean/Logical operators
+    case 'is true':
+      return Boolean(value) === true;
+    case 'is false':
+      return Boolean(value) === false;
+    
     default:
       return true;
   }

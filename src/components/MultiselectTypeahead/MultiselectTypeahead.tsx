@@ -3,14 +3,23 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import * as Checkbox from '@radix-ui/react-checkbox';
 import { CheckIcon } from '@heroicons/react/24/outline';
+import * as Tooltip from '@radix-ui/react-tooltip';
 import { FilterChip } from './FilterChip';
-import { generateFilterOptions } from './dataProcessing';
+import { SearchSection } from './SearchSection';
+import { AttributeSection } from './AttributeSection';
+import { AttributeValuesSection } from './AttributeValuesSection';
+import { generateFilterOptions, getAvailableOperators } from './dataProcessing';
 import type { 
   FilterItem, 
+  FilterOperator,
   Employee,
   Department,
   Team,
-  Group
+  Group,
+  RelationshipOption,
+  GroupOption,
+  PersonOption,
+  AttributeOption
 } from './types';
 
 interface MultiselectTypeaheadProps {
@@ -38,6 +47,36 @@ export const MultiselectTypeahead: React.FC<MultiselectTypeaheadProps> = ({
   disabled = false,
   className = ''
 }) => {
+  // Generate consistent colors for avatars based on name
+  const getAvatarColors = useCallback((name: string) => {
+    // Predefined color combinations (light/dark pairs)
+    const colorPairs = [
+      { bg: 'bg-blue-100', text: 'text-blue-700' },
+      { bg: 'bg-green-100', text: 'text-green-700' },
+      { bg: 'bg-purple-100', text: 'text-purple-700' },
+      { bg: 'bg-pink-100', text: 'text-pink-700' },
+      { bg: 'bg-indigo-100', text: 'text-indigo-700' },
+      { bg: 'bg-yellow-100', text: 'text-yellow-700' },
+      { bg: 'bg-red-100', text: 'text-red-700' },
+      { bg: 'bg-teal-100', text: 'text-teal-700' },
+      { bg: 'bg-orange-100', text: 'text-orange-700' },
+      { bg: 'bg-cyan-100', text: 'text-cyan-700' },
+      { bg: 'bg-emerald-100', text: 'text-emerald-700' },
+      { bg: 'bg-violet-100', text: 'text-violet-700' },
+      { bg: 'bg-rose-100', text: 'text-rose-700' },
+      { bg: 'bg-sky-100', text: 'text-sky-700' },
+      { bg: 'bg-lime-100', text: 'text-lime-700' },
+      { bg: 'bg-amber-100', text: 'text-amber-700' }
+    ];
+    
+    // Use the name to consistently generate the same color for the same person
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+      hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const index = Math.abs(hash) % colorPairs.length;
+    return colorPairs[index];
+  }, []);
   const [query, setQuery] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [expandedRelationships, setExpandedRelationships] = useState(false);
@@ -172,7 +211,7 @@ export const MultiselectTypeahead: React.FC<MultiselectTypeaheadProps> = ({
         const newFilter: FilterItem = {
           id: `filter-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           category: 'people',
-          subject: 'Person',
+          subject: person.label,
           operator: 'is',
           value: employeeId,
           displayValue: person.label,
@@ -197,41 +236,465 @@ export const MultiselectTypeahead: React.FC<MultiselectTypeaheadProps> = ({
 
   // Handle attribute value checkbox changes
   const handleAttributeValueChange = useCallback((attributeKey: string, value: string | number, checked: boolean) => {
+    const attr = filterOptions.attributes.find(a => a.attributeKey === attributeKey);
+    if (!attr) return;
+
     if (checked) {
-      // Add attribute filter immediately
-      const attr = filterOptions.attributes.find(a => a.attributeKey === attributeKey);
-      if (attr) {
+      // Check if there's already a filter for this attribute
+      const existingFilter = selectedFilters.find(f => 
+        f.category === 'attributes' && 
+        f.subject === attr.label
+      );
+
+      if (existingFilter) {
+        // Update existing filter to include the new value
+        let currentValues: string[];
+        if (Array.isArray(existingFilter.value)) {
+          // If it's already an array, the values should already have the prefix
+          // Extract the actual values (remove the prefix)
+          currentValues = existingFilter.value.map(v => {
+            if (v.startsWith(`${attributeKey}:`)) {
+              return v.substring(attributeKey.length + 1);
+            }
+            // If the value doesn't have the prefix, it might be a legacy value
+            return v;
+          });
+        } else {
+          // Extract the actual value from the filter (remove the attributeKey: prefix)
+          const filterValue = String(existingFilter.value);
+          if (filterValue.startsWith(`${attributeKey}:`)) {
+            currentValues = [filterValue.substring(attributeKey.length + 1)];
+          } else {
+            currentValues = [filterValue];
+          }
+        }
+        
+        // Check if the value is already in the current values to avoid duplicates
+        if (currentValues.includes(String(value))) {
+          return; // Value already exists, no need to update
+        }
+        
+        const newValues = [...currentValues, String(value)];
+        const isMultiple = newValues.length > 1;
+        
+        // Update the existing filter
+        const updatedFilter: FilterItem = {
+          ...existingFilter,
+          // Change operator based on number of values: 'is' for single, 'is one of' for multiple
+          operator: isMultiple ? 'is one of' : 'is',
+          value: isMultiple ? newValues.map(v => `${attributeKey}:${v}`) : `${attributeKey}:${value}`,
+          displayValue: isMultiple 
+            ? `${newValues.length} ${attr.label.toLowerCase()}${newValues.length > 1 && !attr.label.toLowerCase().endsWith('s') ? 's' : ''}`
+            : (() => {
+                if (attributeKey === 'probationLength') {
+                  return `${value} months`;
+                } else if (attributeKey === 'weeklyHours') {
+                  return `${value} hours`;
+                } else if (attr.dataType === 'date') {
+                  const date = new Date(String(value));
+                  return date.toLocaleDateString('en-GB', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric'
+                  });
+                }
+                return String(value);
+              })(),
+          availableOperators: isMultiple 
+            ? ['is one of', 'is all of', 'is not']
+            : getAvailableOperators(attr.dataType)
+        };
+        
+        const updatedFilters = selectedFilters.map(f => 
+          f.id === existingFilter.id ? updatedFilter : f
+        );
+        onFiltersChange(updatedFilters);
+      } else {
+        // Create new filter
+        const availableOperators = getAvailableOperators(attr.dataType);
         const newFilter: FilterItem = {
           id: `filter-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           category: 'attributes',
           subject: attr.label,
           operator: 'is',
           value: `${attributeKey}:${value}`,
-          displayValue: String(value),
-          availableOperators: ['is', 'is not'],
+          displayValue: (() => {
+            if (attributeKey === 'probationLength') {
+              return `${value} months`;
+            } else if (attributeKey === 'weeklyHours') {
+              return `${value} hours`;
+            } else if (attr.dataType === 'date') {
+              const date = new Date(String(value));
+              return date.toLocaleDateString('en-GB', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric'
+              });
+            }
+            return String(value);
+          })(),
+          availableOperators,
           metadata: { originalOption: { ...attr, selectedValue: value } }
         };
         const updatedFilters = [...selectedFilters, newFilter];
         onFiltersChange(updatedFilters);
       }
     } else {
-      // Remove attribute filter immediately
-      const filterToRemove = selectedFilters.find(f => 
+      // Remove value from attribute filter
+      const existingFilter = selectedFilters.find(f => 
         f.category === 'attributes' && 
-        f.value === `${attributeKey}:${value}`
+        f.subject === attr.label
       );
-      if (filterToRemove) {
-        const updatedFilters = selectedFilters.filter(f => f.id !== filterToRemove.id);
-        onFiltersChange(updatedFilters);
+
+      if (existingFilter) {
+        if (Array.isArray(existingFilter.value)) {
+          // Remove value from multiple values
+          const newValues = existingFilter.value.filter(v => v !== `${attributeKey}:${value}`);
+          
+          if (newValues.length === 0) {
+            // Remove the entire filter if no values left
+            const updatedFilters = selectedFilters.filter(f => f.id !== existingFilter.id);
+            onFiltersChange(updatedFilters);
+          } else if (newValues.length === 1) {
+            // Convert back to single value filter
+            // Ensure newValues[0] doesn't already have the prefix
+            const singleValue = newValues[0].startsWith(`${attributeKey}:`) 
+              ? newValues[0].substring(attributeKey.length + 1) 
+              : newValues[0];
+              
+            const updatedFilter: FilterItem = {
+              ...existingFilter,
+              // Change back to 'is' when we have only one value
+              operator: 'is',
+              value: `${attributeKey}:${singleValue}`,
+              displayValue: (() => {
+                if (attributeKey === 'probationLength') {
+                  return `${singleValue} months`;
+                } else if (attributeKey === 'weeklyHours') {
+                  return `${singleValue} hours`;
+                } else if (attr.dataType === 'date') {
+                  const date = new Date(String(singleValue));
+                  return date.toLocaleDateString('en-GB', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric'
+                  });
+                }
+                return String(singleValue);
+              })(),
+              availableOperators: getAvailableOperators(attr.dataType)
+            };
+            
+            const updatedFilters = selectedFilters.map(f => 
+              f.id === existingFilter.id ? updatedFilter : f
+            );
+            onFiltersChange(updatedFilters);
+          } else {
+            // Update multiple values filter
+            // Ensure all values have the correct prefix format
+            const formattedValues = newValues.map(v => 
+              v.startsWith(`${attributeKey}:`) ? v : `${attributeKey}:${v}`
+            );
+            
+            const updatedFilter: FilterItem = {
+              ...existingFilter,
+              value: formattedValues,
+              displayValue: `${newValues.length} ${attr.label.toLowerCase()}${newValues.length > 1 && !attr.label.toLowerCase().endsWith('s') ? 's' : ''}`
+            };
+            
+            const updatedFilters = selectedFilters.map(f => 
+              f.id === existingFilter.id ? updatedFilter : f
+            );
+            onFiltersChange(updatedFilters);
+          }
+        } else {
+          // Check if this single value filter matches the value being unchecked
+          const filterValue = String(existingFilter.value);
+          const expectedValue = `${attributeKey}:${value}`;
+          
+          if (filterValue === expectedValue) {
+            // Remove single value filter when the unchecked value matches
+            const updatedFilters = selectedFilters.filter(f => f.id !== existingFilter.id);
+            onFiltersChange(updatedFilters);
+          }
+        }
       }
     }
   }, [filterOptions.attributes, selectedFilters, onFiltersChange]);
 
+  // Helper functions for SearchSection components
+  const renderRelationshipItem = useCallback((rel: RelationshipOption, isSelected: boolean) => (
+    <>
+      <Checkbox.Root
+        id={`relationship-${rel.id}`}
+        checked={isSelected}
+        onCheckedChange={(checked) => handleRelationshipChange(rel.id, checked === true)}
+        className={`mr-2 w-4 h-4 bg-white border border-[#DADADA] rounded-[4px] flex-shrink-0 flex items-center justify-center data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 transition-all ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+      >
+        <Checkbox.Indicator>
+          <CheckIcon className="w-3 h-3 text-white" />
+        </Checkbox.Indicator>
+      </Checkbox.Root>
+      <label htmlFor={`relationship-${rel.id}`} className="text-sm text-gray-700 cursor-pointer flex-1 truncate min-w-0 break-words">
+        <span className="block truncate">{rel.label}</span>
+      </label>
+    </>
+  ), [handleRelationshipChange]);
+
+  const renderGroupItem = useCallback((group: GroupOption, isSelected: boolean) => (
+    <>
+      <Checkbox.Root
+        id={`group-${group.id}`}
+        checked={isSelected}
+        onCheckedChange={(checked) => handleGroupChange(group.groupId, checked === true)}
+        className={`mr-2 w-4 h-4 bg-white border border-[#DADADA] rounded-[4px] flex-shrink-0 flex items-center justify-center data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 transition-all ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+      >
+        <Checkbox.Indicator>
+          <CheckIcon className="w-3 h-3 text-white" />
+        </Checkbox.Indicator>
+      </Checkbox.Root>
+      
+      <label htmlFor={`group-${group.id}`} className="text-sm text-gray-700 cursor-pointer flex-1 truncate min-w-0 break-words">
+        <span className="block truncate">{group.label}</span>
+      </label>
+      
+      {/* Member Count with Tooltip */}
+      <div className="ml-2 flex-shrink-0">
+        <Tooltip.Provider delayDuration={100}>
+          <Tooltip.Root>
+            <Tooltip.Trigger asChild>
+              <div className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center">
+                <span className="text-xs text-gray-500">{group.memberCount}</span>
+              </div>
+            </Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Content
+                className="px-3 py-2 bg-gray-900 text-white text-xs rounded-md shadow-lg z-50 max-w-xs"
+                sideOffset={5}
+              >
+                <div className="text-xs">
+                  <div className="text-left mb-2 font-medium">
+                    {group.memberCount} member{group.memberCount !== 1 ? 's' : ''}
+                  </div>
+                  <div className="text-left space-y-1 max-h-32 overflow-y-auto">
+                    {(() => {
+                      const groupEmployees = employees.filter(emp => 
+                        groups.find(g => g.id === group.groupId)?.members.includes(emp.id)
+                      );
+                      return groupEmployees.map(emp => (
+                        <div key={emp.id} className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-blue-400 flex-shrink-0"></div>
+                          <span className="truncate">{emp.firstName} {emp.lastName}</span>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              </Tooltip.Content>
+            </Tooltip.Portal>
+          </Tooltip.Root>
+        </Tooltip.Provider>
+      </div>
+    </>
+  ), [handleGroupChange, employees, groups]);
+
+  const renderPersonItem = useCallback((person: PersonOption, isSelected: boolean) => (
+    <>
+      <Checkbox.Root
+        id={`person-${person.id}`}
+        checked={isSelected}
+        onCheckedChange={(checked) => handlePersonChange(person.employeeId, checked === true)}
+        className={`mr-2 w-4 h-4 bg-white border border-[#DADADA] rounded-[4px] flex-shrink-0 flex items-center justify-center data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 transition-all ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+      >
+        <Checkbox.Indicator>
+          <CheckIcon className="w-3 h-3 text-white" />
+        </Checkbox.Indicator>
+      </Checkbox.Root>
+      
+      {/* Avatar */}
+      {(() => {
+        const colors = getAvatarColors(person.label);
+        return (
+          <div className={`mr-3 w-10 h-10 rounded-full ${colors.bg} flex-shrink-0 flex items-center justify-center`}>
+            <span className={`text-sm font-medium ${colors.text}`}>
+              {person.label.split(' ').map((n: string) => n[0]).join('').toUpperCase()}
+            </span>
+          </div>
+        );
+      })()}
+      
+      <label htmlFor={`person-${person.id}`} className="flex-1 cursor-pointer min-w-0">
+        <div className="flex flex-col">
+          <span className="block truncate text-[14px] font-medium text-gray-900 leading-tight">{person.label}</span>
+          <span className="block truncate text-[14px] text-gray-500 leading-tight">{person.position}</span>
+        </div>
+      </label>
+    </>
+  ), [handlePersonChange]);
+
+  // Filter functions for SearchSection components
+  const filterRelationships = useCallback((rel: RelationshipOption, query: string) => 
+    rel.label.toLowerCase().includes(query.toLowerCase()) ||
+    (rel.description && rel.description.toLowerCase().includes(query.toLowerCase())) ||
+    rel.targetPersonName.toLowerCase().includes(query.toLowerCase()),
+    []
+  );
+
+  const filterGroups = useCallback((group: GroupOption, query: string) => 
+    group.label.toLowerCase().includes(query.toLowerCase()) ||
+    (group.description && group.description.toLowerCase().includes(query.toLowerCase())),
+    []
+  );
+
+  const filterPeople = useCallback((person: PersonOption, query: string) => 
+    person.label.toLowerCase().includes(query.toLowerCase()) ||
+    (person.position && person.position.toLowerCase().includes(query.toLowerCase())) ||
+    (person.department && person.department.toLowerCase().includes(query.toLowerCase())),
+    []
+  );
+
+  // Helper functions for getting IDs and checking selection
+  const getRelationshipId = useCallback((rel: RelationshipOption) => rel.id, []);
+  const getGroupId = useCallback((group: GroupOption) => group.id, []);
+  const getPersonId = useCallback((person: PersonOption) => person.id, []);
+
+  const isRelationshipSelected = useCallback((rel: RelationshipOption) => 
+    selectedFilters.some(f => 
+      f.category === 'relationships' && 
+      f.metadata?.originalOption && 
+      (f.metadata.originalOption as { id: string }).id === rel.id
+    ),
+    [selectedFilters]
+  );
+
+  const isGroupSelected = useCallback((group: GroupOption) => 
+    selectedFilters.some(f => 
+      f.category === 'groups' && 
+      f.value === group.groupId
+    ),
+    [selectedFilters]
+  );
+
+  const isPersonSelected = useCallback((person: PersonOption) => 
+    selectedFilters.some(f => 
+      f.category === 'people' && 
+      f.value === person.employeeId
+    ),
+    [selectedFilters]
+  );
+
+  // Render function for attribute values
+  const renderAttributeValues = useCallback((attr: AttributeOption) => {
+    if (attr.dataType === 'enum' && attr.possibleValues) {
+      // Enum attributes - show predefined values
+      return attr.possibleValues
+        .filter((value: string) => 
+          value.toLowerCase().includes(valueSearchQuery.toLowerCase())
+        )
+        .map((value: string) => {
+          const isSelected = selectedFilters.some(f => {
+            if (f.category !== 'attributes' || f.subject !== attr.label) return false;
+            
+            if (Array.isArray(f.value)) {
+              // Check if the value exists in the array of values
+              return f.value.some(v => v === `${attr.attributeKey}:${value}`);
+            } else {
+              // Check if the single value matches
+              return f.value === `${attr.attributeKey}:${value}`;
+            }
+          });
+          
+          return (
+            <div key={value} className="group flex items-center hover:bg-gray-50 rounded-[10px] px-4 pr-1 h-8 w-full">
+              <Checkbox.Root
+                id={`attribute-${attr.attributeKey}-${value}`}
+                checked={isSelected}
+                onCheckedChange={(checked) => handleAttributeValueChange(attr.attributeKey, value, checked === true)}
+                className={`mr-2 w-4 h-4 bg-white border border-[#DADADA] rounded-[4px] flex-shrink-0 flex items-center justify-center data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 transition-all ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+              >
+                <Checkbox.Indicator>
+                  <CheckIcon className="w-3 h-3 text-white" />
+                </Checkbox.Indicator>
+              </Checkbox.Root>
+              <label htmlFor={`attribute-${attr.attributeKey}-${value}`} className="text-sm text-gray-700 cursor-pointer flex-1 truncate min-w-0 break-words">
+                <span className="block truncate">{value}</span>
+              </label>
+            </div>
+          );
+        });
+    } else if (attr.dataType === 'string') {
+      // String attributes - show unique values from employee data
+      const uniqueValues = [...new Set(employees.map(emp => emp[attr.attributeKey as keyof Employee]).filter(Boolean))];
+      const filteredValues = uniqueValues
+        .filter(value => 
+          String(value).toLowerCase().includes(valueSearchQuery.toLowerCase())
+        )
+        .slice(0, 20);
+      
+      if (filteredValues.length === 0) {
+        return (
+          <div className="px-4 py-2 text-sm text-gray-500">
+            {valueSearchQuery ? 'No values match your search' : 'No values available'}
+          </div>
+        );
+      }
+      
+      return filteredValues.map((value) => {
+        const isSelected = selectedFilters.some(f => {
+          if (f.category !== 'attributes' || f.subject !== attr.label) return false;
+          
+          if (Array.isArray(f.value)) {
+            // Check if the value exists in the array of values
+            return f.value.some(v => v === `${attr.attributeKey}:${value}`);
+          } else {
+            // Check if the single value matches
+            return f.value === `${attr.attributeKey}:${value}`;
+          }
+        });
+        
+        return (
+          <div key={String(value)} className="group flex items-center hover:bg-gray-50 rounded-[10px] px-4 pr-1 h-8 w-full">
+            <Checkbox.Root
+              id={`attribute-${attr.attributeKey}-${value}`}
+              checked={isSelected}
+              onCheckedChange={(checked) => handleAttributeValueChange(attr.attributeKey, String(value), checked === true)}
+              className={`mr-2 w-4 h-4 bg-white border border-[#DADADA] rounded-[4px] flex-shrink-0 flex items-center justify-center data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 transition-all ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+            >
+              <Checkbox.Indicator>
+                <CheckIcon className="w-3 h-3 text-white" />
+              </Checkbox.Indicator>
+            </Checkbox.Root>
+            <label htmlFor={`attribute-${attr.attributeKey}-${value}`} className="text-sm text-gray-700 cursor-pointer flex-1 truncate min-w-0 break-words">
+              <span className="block truncate">{String(value)}</span>
+            </label>
+          </div>
+        );
+      });
+    } else {
+      return (
+        <div className="px-4 py-2 text-sm text-gray-500">
+          Unsupported data type
+        </div>
+      );
+    }
+  }, [valueSearchQuery, selectedFilters, handleAttributeValueChange, employees]);
+
   // Update filter operator
   const updateFilterOperator = useCallback((filterId: string, newOperator: string) => {
-    const updatedFilters = selectedFilters.map(filter =>
-      filter.id === filterId ? { ...filter, operator: newOperator as FilterItem['operator'] } : filter
-    );
+    console.log('updateFilterOperator called with:', filterId, newOperator);
+    console.log('selectedFilters before update:', selectedFilters);
+    
+    const updatedFilters = selectedFilters.map(filter => {
+      if (filter.id === filterId) {
+        console.log('Updating filter:', filter);
+        const updatedFilter = { ...filter, operator: newOperator as FilterItem['operator'] };
+        console.log('Updated filter:', updatedFilter);
+        return updatedFilter;
+      }
+      return filter;
+    });
+    
+    console.log('Updated filters:', updatedFilters);
     onFiltersChange(updatedFilters);
   }, [selectedFilters, onFiltersChange]);
 
@@ -246,6 +709,8 @@ export const MultiselectTypeahead: React.FC<MultiselectTypeaheadProps> = ({
     onFiltersChange([]);
     setQuery('');
   }, [onFiltersChange]);
+
+
 
   // Get top 3 relationships and groups for default view
   const topRelationships = useMemo(() => 
@@ -314,7 +779,7 @@ export const MultiselectTypeahead: React.FC<MultiselectTypeaheadProps> = ({
       options.push({
         id: person.id,
         label: person.label,
-        description: `${person.position} • ${person.department}`,
+        description: person.department,
         category: 'People',
         type: 'person',
         value: person.employeeId,
@@ -397,7 +862,7 @@ export const MultiselectTypeahead: React.FC<MultiselectTypeaheadProps> = ({
           operator: 'is',
           value: option.value,
           displayValue: 'Select value',
-          availableOperators: ['is', 'is not', 'contains', 'does not contain'],
+          availableOperators: getAvailableOperators((option.originalOption as { dataType: 'string' | 'number' | 'date' | 'enum' }).dataType),
           metadata: { originalOption: option.originalOption }
         };
         break;
@@ -406,7 +871,7 @@ export const MultiselectTypeahead: React.FC<MultiselectTypeaheadProps> = ({
         newFilter = {
           id: `filter-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           category: 'people',
-          subject: 'Person',
+          subject: option.label,
           operator: 'is',
           value: option.value,
           displayValue: option.label,
@@ -429,35 +894,51 @@ export const MultiselectTypeahead: React.FC<MultiselectTypeaheadProps> = ({
     <div className={`relative ${className}`} ref={dropdownRef}>
       {/* Input Field with Clear Icon */}
       <div className="relative">
-        <div className="flex flex-wrap items-center gap-1 px-2 py-1 border border-[#DADADA] rounded-lg bg-white focus-within:ring-2 focus-within:ring-[#1F1F1F] focus-within:border-transparent min-h-[40px]">
-          {/* Selected Filters Display */}
-          {selectedFilters.map((filter) => (
-            <FilterChip
-              key={filter.id}
-              filter={filter}
-              onOperatorChange={(operator) => updateFilterOperator(filter.id, operator)}
-              onRemove={() => removeFilter(filter.id)}
-            />
-          ))}
+        <div className="flex items-center gap-1 px-2 py-1 border border-[#DADADA] rounded-lg bg-white focus-within:ring-2 focus-within:ring-[#1F1F1F] focus-within:border-transparent min-h-[40px]">
+          {/* Left side: Chips and Input */}
+          <div className="flex flex-wrap items-center gap-1 flex-1 min-w-0">
+            {/* Selected Filters Display */}
+            {selectedFilters.map((filter) => (
+              <FilterChip
+                key={filter.id}
+                filter={filter}
+                onOperatorChange={updateFilterOperator}
+                onRemove={() => removeFilter(filter.id)}
+              />
+            ))}
+            
+            <div className="flex-1 min-w-0 relative">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setIsDropdownOpen(true);
+                }}
+                onFocus={() => setIsDropdownOpen(true)}
+                disabled={disabled}
+                placeholder={selectedFilters.length === 0 ? placeholder : ""}
+                className="w-full min-w-0 border-none outline-none bg-transparent text-sm disabled:bg-transparent disabled:cursor-not-allowed pr-6"
+              />
+              {query && (
+                <button
+                  onClick={() => setQuery('')}
+                  className="absolute right-0 top-1/2 transform -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition-colors"
+                  title="Clear search"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
           
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setIsDropdownOpen(true);
-            }}
-            onFocus={() => setIsDropdownOpen(true)}
-            disabled={disabled}
-            placeholder={selectedFilters.length === 0 ? placeholder : ""}
-            className="flex-1 min-w-0 border-none outline-none bg-transparent text-sm disabled:bg-transparent disabled:cursor-not-allowed"
-          />
-          
-          {/* Clear All Filters Icon */}
+          {/* Right side: Clear All Filters Icon - Always positioned on the right */}
           {selectedFilters.length > 0 && (
             <button
               onClick={clearAllFilters}
-              className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+              className="flex-shrink-0 p-1 hover:bg-gray-100 rounded-full transition-colors self-center"
               title="Clear all filters"
             >
               <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -547,77 +1028,23 @@ export const MultiselectTypeahead: React.FC<MultiselectTypeaheadProps> = ({
                     Select a category to browse options
                   </div>
                 ) : activeSubmenu === 'relationships' ? (
-                  // Relationships Content
-                  <div 
-                    className="h-full flex flex-col"
+                  <SearchSection
+                    title="relationships"
+                    searchQuery={relationshipSearchQuery}
+                    onSearchChange={(e: React.ChangeEvent<HTMLInputElement>) => setRelationshipSearchQuery(e.target.value)}
+                    items={filterOptions.relationships}
+                    filterFunction={filterRelationships}
+                    renderItem={renderRelationshipItem}
+                    getItemId={getRelationshipId}
+                    isItemSelected={isRelationshipSelected}
                     onMouseEnter={() => {
                       const input = document.querySelector('input[placeholder="Search relationships..."]') as HTMLInputElement;
                       if (input) input.focus();
                     }}
                     onMouseLeave={() => setActiveSubmenu(null)}
-                  >
-                    {/* Search Input for Relationships */}
-                    <div className="sticky top-0 z-10 p-2" style={{
-                      background: 'rgba(255, 255, 255, 0.30)',
-                      boxShadow: '0 0 8px 2px rgba(255, 255, 255, 0.30) inset, 0 0.5px 0 0 #FFF inset, 0 0 0.5px 0 rgba(0, 0, 0, 0.15)'
-                    }}>
-                      <input
-                        type="text"
-                        placeholder="Search relationships..."
-                        value={relationshipSearchQuery}
-                        onChange={(e) => setRelationshipSearchQuery(e.target.value)}
-                        className="w-full px-3 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                        autoFocus={false}
-                      />
-                    </div>
-                    
-                    <div className="flex-1 overflow-y-auto p-1 space-y-0">
-                      {(() => {
-                        const filteredRelationships = filterOptions.relationships.filter(rel => 
-                          rel.label.toLowerCase().includes(relationshipSearchQuery.toLowerCase()) ||
-                          (rel.description && rel.description.toLowerCase().includes(relationshipSearchQuery.toLowerCase())) ||
-                          rel.targetPersonName.toLowerCase().includes(relationshipSearchQuery.toLowerCase())
-                        );
-                        
-                        if (relationshipSearchQuery && filteredRelationships.length === 0) {
-                          return (
-                            <div className="px-4 py-4 text-center">
-                              <div className="text-gray-700 font-medium mb-1">No results found</div>
-                              <div className="text-gray-500 text-sm">It looks like your search is a bit too specific. Try adjusting or resetting your search to see more results.</div>
-                            </div>
-                          );
-                        }
-                        
-                        return filteredRelationships.map((rel) => {
-                          const isSelected = selectedFilters.some(f => 
-                            f.category === 'relationships' && 
-                            f.metadata?.originalOption && 
-                            (f.metadata.originalOption as { id: string }).id === rel.id
-                          );
-                          
-                          return (
-                            <div key={rel.id} className="group flex items-center hover:bg-gray-50 rounded-[10px] px-4 pr-1 h-8 w-full">
-                              <Checkbox.Root
-                                id={`relationship-${rel.id}`}
-                                checked={isSelected}
-                                onCheckedChange={(checked) => handleRelationshipChange(rel.id, checked === true)}
-                                className={`mr-2 w-4 h-4 bg-white border border-[#DADADA] rounded-[4px] flex-shrink-0 flex items-center justify-center data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 transition-all ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                              >
-                                <Checkbox.Indicator>
-                                  <CheckIcon className="w-3 h-3 text-white" />
-                                </Checkbox.Indicator>
-                              </Checkbox.Root>
-                              <label htmlFor={`relationship-${rel.id}`} className="text-sm text-gray-700 cursor-pointer flex-1 truncate min-w-0 break-words">
-                                <span className="block truncate">{rel.label}</span>
-                              </label>
-                            </div>
-                          );
-                        });
-                      })()}
-                    </div>
-                  </div>
+                    footer={undefined}
+                  />
                 ) : activeSubmenu === 'groups' ? (
-                  // Groups Content
                   <div 
                     className="h-full flex flex-col"
                     onMouseEnter={() => {
@@ -631,16 +1058,30 @@ export const MultiselectTypeahead: React.FC<MultiselectTypeaheadProps> = ({
                       background: 'rgba(255, 255, 255, 0.30)',
                       boxShadow: '0 0 8px 2px rgba(255, 255, 255, 0.30) inset, 0 0.5px 0 0 #FFF inset, 0 0 0.5px 0 rgba(0, 0, 0, 0.15)'
                     }}>
-                      <input
-                        type="text"
-                        placeholder="Search groups..."
-                        value={groupSearchQuery}
-                        onChange={(e) => setGroupSearchQuery(e.target.value)}
-                        className="w-full px-3 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                        autoFocus={false}
-                      />
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="Search groups..."
+                          value={groupSearchQuery}
+                          onChange={(e) => setGroupSearchQuery(e.target.value)}
+                          className="w-full px-3 py-1 pr-8 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                          autoFocus={false}
+                        />
+                        {groupSearchQuery && (
+                          <button
+                            onClick={() => setGroupSearchQuery('')}
+                            className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition-colors"
+                            title="Clear search"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
                     </div>
                     
+                    {/* Groups List */}
                     <div className="flex-1 overflow-y-auto p-1 space-y-0">
                       {(() => {
                         const filteredGroups = filterOptions.groups.filter(group => 
@@ -652,338 +1093,84 @@ export const MultiselectTypeahead: React.FC<MultiselectTypeaheadProps> = ({
                           return (
                             <div className="px-4 py-4 text-center">
                               <div className="text-gray-700 font-medium mb-1">No results found</div>
-                              <div className="text-gray-500 text-sm">It looks like your search is a bit too specific. Try adjusting or resetting your search to see more results.</div>
+                              <div className="text-gray-400 text-sm">Try adjusting your search terms</div>
                             </div>
                           );
                         }
                         
                         return filteredGroups.map((group) => {
-                          const isSelected = selectedFilters.some(f => 
-                            f.category === 'groups' && 
-                            f.value === group.groupId
-                          );
+                          const isSelected = isGroupSelected(group);
                           
                           return (
-                            <div key={group.id} className="group flex items-center hover:bg-gray-50 rounded-[10px] px-4 pr-1 h-8 w-full">
-                              <Checkbox.Root
-                                id={`group-${group.id}`}
-                                checked={isSelected}
-                                onCheckedChange={(checked) => handleGroupChange(group.groupId, checked === true)}
-                                className={`mr-2 w-4 h-4 bg-white border border-[#DADADA] rounded-[4px] flex-shrink-0 flex items-center justify-center data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 transition-all ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                              >
-                                <Checkbox.Indicator>
-                                  <CheckIcon className="w-3 h-3 text-white" />
-                                </Checkbox.Indicator>
-                              </Checkbox.Root>
-                              <label htmlFor={`group-${group.id}`} className="text-sm text-gray-700 cursor-pointer flex-1 truncate min-w-0 break-words">
-                                <span className="block truncate">{group.label}</span>
-                              </label>
+                            <div key={getGroupId(group)} className="group flex items-center hover:bg-gray-50 rounded-[10px] px-4 pr-1 h-8 w-full">
+                              {renderGroupItem(group, isSelected)}
                             </div>
                           );
                         });
                       })()}
                     </div>
+                    
+                    {/* Footer with New Group Button */}
+                    <div className="sticky bottom-0 px-4 py-1 border-t border-gray-200 bg-white">
+                      <button
+                        className="flex items-center gap-2 px-2 py-1 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-50 rounded transition-colors"
+                        onClick={() => {
+                          // TODO: Implement new group functionality
+                          console.log('New group clicked');
+                        }}
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                        </svg>
+                        New group
+                      </button>
+                    </div>
                   </div>
-                ) : activeSubmenu === 'attributes' ? (
-                  // Attributes Content - Two Column Layout
-                  <div className="flex h-full">
-                    {/* First Column - Attribute List */}
-                    <div 
-                      className="w-1/2 border-r border-gray-200 overflow-y-auto flex-shrink-0"
-                      onMouseEnter={() => {
-                        const input = document.querySelector('input[placeholder="Search attributes..."]') as HTMLInputElement;
-                        if (input) input.focus();
-                      }}
-                      onMouseLeave={() => setActiveSubmenu(null)}
-                    >
-                      {/* Search Input for Attributes */}
-                      <div className="sticky top-0 bg-white z-10 p-2">
-                        <input
-                          type="text"
-                          placeholder="Search attributes..."
-                          value={attributeSearchQuery}
-                          onChange={(e) => setAttributeSearchQuery(e.target.value)}
-                          className="w-full px-3 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                          autoFocus={false}
-                        />
-                      </div>
-                      
-                      <div className="p-1 space-y-0">
-                        {(() => {
-                          const filteredAttributes = filterOptions.attributes.filter(attr => 
-                            attr.label.toLowerCase().includes(attributeSearchQuery.toLowerCase()) ||
-                            (attr.description && attr.description.toLowerCase().includes(attributeSearchQuery.toLowerCase()))
-                          );
-                          
-                          if (attributeSearchQuery && filteredAttributes.length === 0) {
-                            return (
-                              <div className="px-4 py-4 text-center">
-                                <div className="text-gray-700 font-medium mb-1">No results found</div>
-                                <div className="text-gray-400 text-sm">It looks like your search is a bit too specific. Try adjusting or resetting your search to see more results.</div>
-                              </div>
-                            );
-                          }
-                          
-                          return filteredAttributes.map((attr) => (
-                            <button
-                              key={attr.id}
-                              onMouseEnter={() => setSelectedAttribute(attr.id)}
-                              className={`w-full text-left px-4 pr-1 h-8 text-sm text-gray-700 hover:bg-gray-50 rounded-[10px] transition-colors min-w-0 flex items-center justify-between ${
-                                selectedAttribute === attr.id ? 'bg-gray-100' : ''
-                              }`}
-                            >
-                              <span className="truncate flex-1">{attr.label}</span>
-                              <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                              </svg>
-                            </button>
-                          ));
-                        })()}
-                      </div>
+                                ) : activeSubmenu === 'attributes' ? (
+                  <div 
+                    className="flex h-full"
+                    onMouseLeave={() => setActiveSubmenu(null)}
+                  >
+                    <div className="w-1/2 border-r border-gray-200 flex-shrink-0">
+                      <AttributeSection
+                        attributes={filterOptions.attributes}
+                        selectedAttribute={selectedAttribute}
+                        attributeSearchQuery={attributeSearchQuery}
+                        onAttributeSearchChange={(e) => setAttributeSearchQuery(e.target.value)}
+                        onAttributeSelect={setSelectedAttribute}
+                        onMouseEnter={() => {
+                          // Small delay to prevent accidental focus when quickly moving between columns
+                          setTimeout(() => {
+                            const input = document.querySelector('input[placeholder="Search attributes..."]') as HTMLInputElement;
+                            if (input) input.focus();
+                          }, 100);
+                        }}
+                        onMouseLeave={() => {
+                          // Don't clear activeSubmenu when moving between attribute columns
+                        }}
+                      />
                     </div>
 
-                    {/* Second Column - Attribute Values */}
-                    <div 
-                      className="w-1/2 flex-shrink-0"
-                      onMouseEnter={() => {
-                        const input = document.querySelector('input[placeholder="Search values..."]') as HTMLInputElement;
-                        if (input) input.focus();
-                      }}
-                      onMouseLeave={() => setActiveSubmenu(null)}
-                    >
-                      {selectedAttribute ? (
-                        <div className="h-full flex flex-col">
-                          {(() => {
-                            const attr = filterOptions.attributes.find(a => a.id === selectedAttribute);
-                            if (!attr) return null;
-                            
-                            return (
-                              <div className="h-full flex flex-col">
-                                {/* Search Input for Values */}
-                                <div className="sticky top-0 z-10 p-2" style={{
-                                  background: 'rgba(255, 255, 255, 0.30)',
-                                  boxShadow: '0 0 8px 2px rgba(255, 255, 255, 0.30) inset, 0 0.5px 0 0 #FFF inset, 0 0 0.5px 0 rgba(0, 0, 0, 0.15)'
-                                }}>
-                                  <input
-                                    type="text"
-                                    placeholder="Search values..."
-                                    value={valueSearchQuery}
-                                    onChange={(e) => setValueSearchQuery(e.target.value)}
-                                    className="w-full px-3 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                                    autoFocus={false}
-                                  />
-                                </div>
-                                
-                                <div className="flex-1 overflow-y-auto p-1 space-y-0">
-                                  {attr.dataType === 'enum' && attr.possibleValues ? (
-                                  // Enum attributes - show predefined values
-                                  attr.possibleValues
-                                    .filter(value => 
-                                      value.toLowerCase().includes(valueSearchQuery.toLowerCase())
-                                    )
-                                    .map((value) => {
-                                      const isSelected = selectedFilters.some(f => 
-                                        f.category === 'attributes' && 
-                                        f.value === `${attr.attributeKey}:${value}`
-                                      );
-                                      
-                                      return (
-                                        <div key={value} className="group flex items-center hover:bg-gray-50 rounded-[10px] px-4 pr-1 h-8 w-full">
-                                          <Checkbox.Root
-                                            id={`attribute-${attr.attributeKey}-${value}`}
-                                            checked={isSelected}
-                                            onCheckedChange={(checked) => handleAttributeValueChange(attr.attributeKey, value, checked === true)}
-                                            className={`mr-2 w-4 h-4 bg-white border border-[#DADADA] rounded-[4px] flex-shrink-0 flex items-center justify-center data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 transition-all ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                                          >
-                                            <Checkbox.Indicator>
-                                              <CheckIcon className="w-3 h-3 text-white" />
-                                            </Checkbox.Indicator>
-                                          </Checkbox.Root>
-                                          <label htmlFor={`attribute-${attr.attributeKey}-${value}`} className="text-sm text-gray-700 cursor-pointer flex-1 truncate min-w-0 break-words">
-                                            <span className="block truncate">{value}</span>
-                                          </label>
-                                        </div>
-                                      );
-                                    })
-                                ) : attr.dataType === 'string' ? (
-                                  // String attributes - show unique values from employee data
-                                  (() => {
-                                    const uniqueValues = [...new Set(employees.map(emp => emp[attr.attributeKey as keyof Employee]).filter(Boolean))];
-                                    const filteredValues = uniqueValues
-                                      .filter(value => 
-                                        String(value).toLowerCase().includes(valueSearchQuery.toLowerCase())
-                                      )
-                                      .slice(0, 20);
-                                    
-                                    return filteredValues.length > 0 ? (
-                                      filteredValues.map((value) => {
-                                        const isSelected = selectedFilters.some(f => 
-                                          f.category === 'attributes' && 
-                                          f.value === `${attr.attributeKey}:${value}`
-                                        );
-                                        
-                                        return (
-                                          <div key={String(value)} className="group flex items-center hover:bg-gray-50 rounded-[10px] px-4 pr-1 h-8 w-full">
-                                            <Checkbox.Root
-                                              id={`attribute-${attr.attributeKey}-${value}`}
-                                              checked={isSelected}
-                                              onCheckedChange={(checked) => handleAttributeValueChange(attr.attributeKey, String(value), checked === true)}
-                                              className={`mr-2 w-4 h-4 bg-white border border-[#DADADA] rounded-[4px] flex-shrink-0 flex items-center justify-center data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 transition-all ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                                            >
-                                              <Checkbox.Indicator>
-                                                <CheckIcon className="w-3 h-3 text-white" />
-                                              </Checkbox.Indicator>
-                                            </Checkbox.Root>
-                                            <label htmlFor={`attribute-${attr.attributeKey}-${value}`} className="text-sm text-gray-700 cursor-pointer flex-1 truncate min-w-0 break-words">
-                                              <span className="block truncate">{String(value)}</span>
-                                            </label>
-                                          </div>
-                                        );
-                                      })
-                                    ) : (
-                                      <div className="px-4 py-2 text-sm text-gray-500">
-                                        {valueSearchQuery ? 'No values match your search' : 'No values available'}
-                                      </div>
-                                    );
-                                  })()
-                                ) : attr.dataType === 'number' ? (
-                                  // Number attributes - show range or common values
-                                  (() => {
-                                    const values = employees.map(emp => emp[attr.attributeKey as keyof Employee]).filter(Boolean) as number[];
-                                    if (values.length > 0) {
-                                      const min = Math.min(...values);
-                                      const max = Math.max(...values);
-                                      const commonValues = [min, Math.round((min + max) / 2), max];
-                                      const filteredValues = commonValues.filter(value => {
-                                        const displayValue = attr.attributeKey === 'weeklyHours' ? `${value} hours` : 
-                                                           attr.attributeKey === 'probationLength' ? `${value} months` : 
-                                                           String(value);
-                                        return displayValue.toLowerCase().includes(valueSearchQuery.toLowerCase());
-                                      });
-                                      
-                                      return filteredValues.length > 0 ? (
-                                        filteredValues.map((value) => {
-                                          // Format display value based on attribute type
-                                          let displayValue = String(value);
-                                          if (attr.attributeKey === 'weeklyHours') {
-                                            displayValue = `${value} hours`;
-                                          } else if (attr.attributeKey === 'probationLength') {
-                                            displayValue = `${value} months`;
-                                          }
-                                          
-                                          const isSelected = selectedFilters.some(f => 
-                                            f.category === 'attributes' && 
-                                            f.value === `${attr.attributeKey}:${value}`
-                                          );
-                                          
-                                          return (
-                                            <div key={value} className="group flex items-center hover:bg-gray-50 rounded-[10px] px-4 pr-1 h-8 w-full">
-                                              <Checkbox.Root
-                                                id={`attribute-${attr.attributeKey}-${value}`}
-                                                checked={isSelected}
-                                                onCheckedChange={(checked) => handleAttributeValueChange(attr.attributeKey, value, checked === true)}
-                                                className={`mr-2 w-4 h-4 bg-white border border-[#DADADA] rounded-[4px] flex-shrink-0 flex items-center justify-center data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 transition-all ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                                              >
-                                                <Checkbox.Indicator>
-                                                  <CheckIcon className="w-3 h-3 text-white" />
-                                                </Checkbox.Indicator>
-                                              </Checkbox.Root>
-                                              <label htmlFor={`attribute-${attr.attributeKey}-${value}`} className="text-sm text-gray-700 cursor-pointer flex-1 truncate min-w-0 break-words">
-                                                <span className="block truncate">{displayValue}</span>
-                                              </label>
-                                            </div>
-                                          );
-                                        })
-                                      ) : (
-                                        <div className="px-4 py-2 text-sm text-gray-500">
-                                          {valueSearchQuery ? 'No values match your search' : 'No values available'}
-                                        </div>
-                                      );
-                                    }
-                                    return (
-                                      <div className="px-4 py-2 text-sm text-gray-500">
-                                        No values available
-                                      </div>
-                                    );
-                                  })()
-                                ) : attr.dataType === 'date' ? (
-                                  // Date attributes - show full dates
-                                  (() => {
-                                    const dateValues = employees.map(emp => emp[attr.attributeKey as keyof Employee]).filter(Boolean) as string[];
-                                    if (dateValues.length > 0) {
-                                      // Get unique dates and format them
-                                      const uniqueDates = [...new Set(dateValues)];
-                                      const filteredDates = uniqueDates
-                                        .filter(dateStr => {
-                                          const date = new Date(dateStr);
-                                          const formattedDate = date.toLocaleDateString('en-US', {
-                                            year: 'numeric',
-                                            month: 'short',
-                                            day: 'numeric'
-                                          });
-                                          return formattedDate.toLowerCase().includes(valueSearchQuery.toLowerCase());
-                                        })
-                                        .slice(0, 20);
-                                      
-                                      return filteredDates.length > 0 ? (
-                                        filteredDates.map((dateStr) => {
-                                          const date = new Date(dateStr);
-                                          const formattedDate = date.toLocaleDateString('en-US', {
-                                            year: 'numeric',
-                                            month: 'short',
-                                            day: 'numeric'
-                                          });
-                                          
-                                          const isSelected = selectedFilters.some(f => 
-                                            f.category === 'attributes' && 
-                                            f.value === `${attr.attributeKey}:${dateStr}`
-                                          );
-                                          
-                                          return (
-                                            <div key={dateStr} className="group flex items-center hover:bg-gray-50 rounded-[10px] px-4 pr-1 h-8 w-full">
-                                              <Checkbox.Root
-                                                id={`attribute-${attr.attributeKey}-${dateStr}`}
-                                                checked={isSelected}
-                                                onCheckedChange={(checked) => handleAttributeValueChange(attr.attributeKey, dateStr, checked === true)}
-                                                className={`mr-2 w-4 h-4 bg-white border border-[#DADADA] rounded-[4px] flex-shrink-0 flex items-center justify-center data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 transition-all ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                                              >
-                                                <Checkbox.Indicator>
-                                                  <CheckIcon className="w-3 h-3 text-white" />
-                                                </Checkbox.Indicator>
-                                              </Checkbox.Root>
-                                              <label htmlFor={`attribute-${attr.attributeKey}-${dateStr}`} className="text-sm text-gray-700 cursor-pointer flex-1 truncate min-w-0 break-words">
-                                                <span className="block truncate">{formattedDate}</span>
-                                              </label>
-                                            </div>
-                                          );
-                                        })
-                                      ) : (
-                                        <div className="px-4 py-2 text-sm text-gray-500">
-                                          {valueSearchQuery ? 'No values match your search' : 'No values available'}
-                                        </div>
-                                      );
-                                    }
-                                    return (
-                                      <div className="px-4 py-0 text-sm text-gray-500">
-                                        No values available
-                                      </div>
-                                    );
-                                  })()
-                                ) : (
-                                  <div className="px-4 py-2 text-sm text-gray-500">
-                                    Unsupported data type
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      </div>
-                      ) : (
-                        <div className="p-4 text-left text-gray-500 text-sm">
-                          Select an attribute to see its values
-                        </div>
-                      )}
+                    <div className="w-1/2 flex-shrink-0">
+                      <AttributeValuesSection
+                        selectedAttribute={selectedAttribute}
+                        filterOptions={filterOptions}
+                        valueSearchQuery={valueSearchQuery}
+                        selectedFilters={selectedFilters}
+                        employees={employees}
+                        onValueSearchChange={(e) => setValueSearchQuery(e.target.value)}
+                        onAttributeValueChange={handleAttributeValueChange}
+                        onMouseEnter={() => {
+                          // Small delay to prevent accidental focus when quickly moving between columns
+                          setTimeout(() => {
+                            const input = document.querySelector('input[placeholder="Search values..."]') as HTMLInputElement;
+                            if (input) input.focus();
+                          }, 100);
+                        }}
+                        onMouseLeave={() => {
+                          // Don't clear activeSubmenu when moving between attribute columns
+                        }}
+                      />
                     </div>
                   </div>
                 ) : activeSubmenu === 'people' ? (
@@ -1001,14 +1188,27 @@ export const MultiselectTypeahead: React.FC<MultiselectTypeaheadProps> = ({
                       background: 'rgba(255, 255, 255, 0.30)',
                       boxShadow: '0 0 8px 2px rgba(255, 255, 255, 0.30) inset, 0 0.5px 0 0 #FFF inset, 0 0 0.5px 0 rgba(0, 0, 0, 0.15)'
                     }}>
-                      <input
-                        type="text"
-                        placeholder="Search people..."
-                        value={peopleSearchQuery}
-                        onChange={(e) => setPeopleSearchQuery(e.target.value)}
-                        className="w-full px-3 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                        autoFocus={false}
-                      />
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="Search people..."
+                          value={peopleSearchQuery}
+                          onChange={(e) => setPeopleSearchQuery(e.target.value)}
+                          className="w-full px-3 py-1 pr-8 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                          autoFocus={false}
+                        />
+                        {peopleSearchQuery && (
+                          <button
+                            onClick={() => setPeopleSearchQuery('')}
+                            className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition-colors"
+                            title="Clear search"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
                     </div>
                     
                     <div className="flex-1 overflow-y-auto p-1 space-y-0">
@@ -1035,21 +1235,34 @@ export const MultiselectTypeahead: React.FC<MultiselectTypeaheadProps> = ({
                           );
                           
                           return (
-                            <div key={person.id} className="group flex items-center hover:bg-gray-50 rounded-[10px] px-4 pr-1 h-8 w-full">
+                            <div key={person.id} className="group flex items-center hover:bg-gray-50 rounded-[10px] px-4 pr-1 h-14 w-full">
                               <Checkbox.Root
                                 id={`person-${person.id}`}
                                 checked={isSelected}
                                 onCheckedChange={(checked) => handlePersonChange(person.employeeId, checked === true)}
-                                className={`mr-2 w-4 h-4 bg-white border border-[#DADADA] rounded-[4px] flex-shrink-0 flex items-center justify-center data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 transition-all ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                                className={`mr-2 w-4 h-4 bg-white border border-[#DADADA] rounded-[4px] flex-shrink-0 flex items-center justify-center data-[state=checked]:bg-blue-500 data-[state:checked]:border-blue-500 transition-all ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                               >
                                 <Checkbox.Indicator>
                                   <CheckIcon className="w-3 h-3 text-white" />
                                 </Checkbox.Indicator>
                               </Checkbox.Root>
-                              <label htmlFor={`person-${person.id}`} className="text-sm text-gray-700 cursor-pointer flex-1 truncate min-w-0 break-words">
+                              
+                              {/* Avatar */}
+                              {(() => {
+                                const colors = getAvatarColors(person.label);
+                                return (
+                                  <div className={`mr-3 w-10 h-10 rounded-full ${colors.bg} flex-shrink-0 flex items-center justify-center`}>
+                                    <span className={`text-sm font-medium ${colors.text}`}>
+                                      {person.label.split(' ').map((n: string) => n[0]).join('').toUpperCase()}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
+                              
+                              <label htmlFor={`person-${person.id}`} className="flex-1 cursor-pointer min-w-0">
                                 <div className="flex flex-col">
-                                  <span className="block truncate font-medium">{person.label}</span>
-                                  <span className="block truncate text-xs text-gray-500">{person.position} • {person.department}</span>
+                                  <span className="block truncate text-[14px] font-medium text-gray-900 leading-tight">{person.label}</span>
+                                  <span className="block truncate text-[14px] text-gray-500 leading-tight">{person.position}</span>
                                 </div>
                               </label>
                             </div>

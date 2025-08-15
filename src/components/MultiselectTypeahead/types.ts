@@ -5,17 +5,28 @@ export type { Employee, Department, Team, Group };
 
 // Core filter types
 export type FilterOperator = 
+  // String/Text operators
   | 'is' | 'is not'
   | 'contains' | 'does not contain'
-  | 'greater than' | 'less than' | 'between'
-  | 'before' | 'after';
+  | 'starts with' | 'ends with'
+  | 'is empty'
+  // Multiple value operators
+  | 'is one of' | 'is all of'
+  // Number operators
+  | 'less than' | 'greater than'
+  | 'less than or equal' | 'greater than or equal'
+  // Date/Time operators
+  | 'before' | 'after'
+  | 'on or before' | 'on or after'
+  // Boolean/Logical operators
+  | 'is true' | 'is false';
 
 export interface FilterItem {
   id: string;
   category: 'relationships' | 'groups' | 'attributes' | 'people';
   subject: string;
   operator: FilterOperator;
-  value: string | number | Date;
+  value: string | number | Date | string[];
   displayValue: string;
   availableOperators: FilterOperator[];
   metadata?: Record<string, unknown>; // Additional data for complex filters
